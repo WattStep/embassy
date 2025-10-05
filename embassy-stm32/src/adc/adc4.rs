@@ -237,7 +237,7 @@ impl<'d, T: Instance> Adc4<'d, T> {
         });
     }
 
-    fn calibrate(&mut self) {
+    pub fn calibrate(&mut self) {
         T::regs().cr().modify(|w| w.set_adcal(true));
         while T::regs().cr().read().adcal() {}
         T::regs().isr().modify(|w| w.set_eocal(true));
