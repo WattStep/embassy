@@ -574,6 +574,11 @@ impl<'d, T: GeneralInstance4Channel> Timer<'d, T> {
             .modify(|w| w.set_ccp(channel.index(), polarity.into()));
     }
 
+    /// Set master mode selection 2
+    pub fn set_mms2_selection(&self, mms2: vals::Mms2) {
+        self.regs_gp16().cr2().modify(|w| w.set_mms2(mms2));
+    }
+
     /// Enable/disable a channel.
     pub fn enable_channel(&self, channel: Channel, enable: bool) {
         self.regs_gp16().ccer().modify(|w| w.set_cce(channel.index(), enable));
