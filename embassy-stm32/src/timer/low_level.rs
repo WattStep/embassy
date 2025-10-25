@@ -10,7 +10,7 @@ use core::mem::ManuallyDrop;
 
 use embassy_hal_internal::Peri;
 // Re-export useful enums
-pub use stm32_metapac::timer::vals::{FilterValue, Sms as SlaveMode, Ts as TriggerSourcem, Mms};
+pub use stm32_metapac::timer::vals::{FilterValue, Sms as SlaveMode, Ts as TriggerSource, Mms};
 
 use super::*;
 use crate::pac::timer::vals;
