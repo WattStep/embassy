@@ -10,9 +10,8 @@ use core::cell::RefCell;
 
 use defmt::info;
 use embassy_stm32::adc::{Adc, AdcChannel as _, Exten, RxDma, SampleTime};
-use embassy_stm32::dma::ReadableRingBuffer;
 use embassy_stm32::interrupt::typelevel::{ADC1_2, Interrupt};
-use embassy_stm32::peripherals::{ADC1, DMA1_CH1};
+use embassy_stm32::peripherals::ADC1;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::complementary_pwm::{ComplementaryPwm, Mms2};
 use embassy_stm32::timer::low_level::CountingMode;
@@ -77,6 +76,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // Configure regular conversions with DMA
     let mut adc1 = Adc::new(p.ADC1);
+
     let mut vrefint_channel = adc1.enable_vrefint().degrade_adc();
     let mut pa0 = p.PC1.degrade_adc();
     let regular_sequence = [
@@ -84,34 +84,22 @@ async fn main(_spawner: embassy_executor::Spawner) {
         (&mut pa0, SampleTime::CYCLES247_5),
     ]
     .into_iter();
-    adc1.configure_regular_sequence(regular_sequence);
-    adc1.set_regular_conversion_trigger(ADC1_REGULAR_TRIGGER_TIM1_TRGO2, Exten::RISING_EDGE);
 
     // Configure DMA for retrieving regular ADC measurements
-    let mut dma1_ch1 = p.DMA1_CH1;
-    // Using a buffer larger than amount of samples gives more margin for timing of
-    // main loop iterations and DMA transfers.
+    let dma1_ch1 = p.DMA1_CH1;
+    // Using buffer of double size means the half-full interrupts will generate at the expected rate
     let mut readings = [0u16; 4];
-    let dma_request = <DMA1_CH1 as RxDma<ADC1>>::request(&dma1_ch1);
-    let mut transfer = unsafe {
-        ReadableRingBuffer::new(
-            dma1_ch1.reborrow(),
-            dma_request,
-            adc1.get_data_register_address(),
-            &mut readings,
-            Default::default(),
-        )
-    };
-    transfer.start();
+    let mut ring_buffered_adc = adc1.into_ring_buffered(dma1_ch1, &mut readings, regular_sequence);
 
     // Configurations of Injected ADC measurements
     let mut pa2 = p.PA2.degrade_adc();
     let injected_seq = [(&mut pa2, SampleTime::CYCLES247_5)].into_iter();
     adc1.configure_injected_sequence(injected_seq);
+
+    adc1.set_regular_conversion_trigger(ADC1_REGULAR_TRIGGER_TIM1_TRGO2, Exten::RISING_EDGE);
     adc1.set_injected_conversion_trigger(ADC1_INJECTED_TRIGGER_TIM1_TRGO2, Exten::RISING_EDGE);
 
     // ADC must be started after all configurations are completed
-    adc1.start_regular_conversion();
     adc1.start_injected_conversion();
 
     // Enable interrupt at end of injected ADC conversion
@@ -128,15 +116,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut data = [0u16; 2];
     loop {
         {
-            // No need to access the ADC object here, instead we get the readings from the DMA
-            match transfer.read_exact(&mut data).await {
+            match ring_buffered_adc.read(&mut data).await {
                 Ok(n) => {
                     defmt::info!("Regular ADC reading, VrefInt: {}, PA0: {}", data[0], data[1]);
                     defmt::info!("Remaining samples: {}", n,);
                 }
                 Err(e) => {
                     defmt::error!("DMA error: {:?}", e);
-                    transfer.clear();
+                    ring_buffered_adc.clear();
                 }
             }
         }
