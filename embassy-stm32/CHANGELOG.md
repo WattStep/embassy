@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased - ReleaseDate
 
-- feat: Rework regular ADC conversions for g4 to allow external trigger and avoid ADC reconfiguration for each conversion ([#4786](https://github.com/embassy-rs/embassy/pull/4786))
-- feat: Added support for injected ADC sampling for g4 ([#4243](https://github.com/embassy-rs/embassy/pull/4243))
 - fix flash erase on L4 & L5
 - fix: Fixed STM32H5 builds requiring time feature
 - feat: Derive Clone, Copy for QSPI Config
