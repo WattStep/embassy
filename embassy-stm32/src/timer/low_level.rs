@@ -293,19 +293,19 @@ impl<'d, T: CoreInstance> Timer<'d, T> {
     /// the timer counter will wrap around at the same frequency as is being set.
     /// In center-aligned mode (which not all timers support), the wrap-around frequency is effectively halved
     /// because it needs to count up and down.
-    pub fn set_frequency(&self, frequency: Hertz) {
+    pub fn set_frequency(&self, frequency: Hertz, generate_update_event: bool) {
         match T::BITS {
             TimerBits::Bits16 => {
-                self.set_frequency_internal(frequency, 16);
+                self.set_frequency_internal(frequency, 16, generate_update_event);
             }
             #[cfg(not(stm32l0))]
             TimerBits::Bits32 => {
-                self.set_frequency_internal(frequency, 32);
+                self.set_frequency_internal(frequency, 32, generate_update_event);
             }
         }
     }
 
-    pub(crate) fn set_frequency_internal(&self, frequency: Hertz, max_divide_by_bits: u8) {
+    pub(crate) fn set_frequency_internal(&self, frequency: Hertz, max_divide_by_bits: u8, generate_update_event: bool) {
         let f = frequency.0;
         assert!(f > 0);
         let timer_f = T::frequency().0;
@@ -322,10 +322,6 @@ impl<'d, T: CoreInstance> Timer<'d, T> {
                 let regs = self.regs_core();
                 regs.psc().write_value(psc);
                 regs.arr().write(|r| r.set_arr(arr));
-
-                regs.cr1().modify(|r| r.set_urs(vals::Urs::COUNTER_ONLY));
-                regs.egr().write(|r| r.set_ug(true));
-                regs.cr1().modify(|r| r.set_urs(vals::Urs::ANY_EVENT));
             }
             #[cfg(not(stm32l0))]
             TimerBits::Bits32 => {
@@ -335,11 +331,12 @@ impl<'d, T: CoreInstance> Timer<'d, T> {
                 let regs = self.regs_gp32_unchecked();
                 regs.psc().write_value(psc);
                 regs.arr().write_value(arr);
-
-                regs.cr1().modify(|r| r.set_urs(vals::Urs::COUNTER_ONLY));
-                regs.egr().write(|r| r.set_ug(true));
-                regs.cr1().modify(|r| r.set_urs(vals::Urs::ANY_EVENT));
             }
+        }
+        if generate_update_event {
+            regs.cr1().modify(|r| r.set_urs(vals::Urs::COUNTER_ONLY));
+            regs.egr().write(|r| r.set_ug(true));
+            regs.cr1().modify(|r| r.set_urs(vals::Urs::ANY_EVENT));
         }
     }
 

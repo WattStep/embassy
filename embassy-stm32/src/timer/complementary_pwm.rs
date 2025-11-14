@@ -315,7 +315,7 @@ impl<'d, T: AdvancedInstance4Channel> embedded_hal_02::Pwm for ComplementaryPwm<
     where
         P: Into<Self::Time>,
     {
-        self.inner.set_frequency(period.into());
+        self.inner.set_frequency(period.into(), false);
     }
 }
 

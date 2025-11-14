@@ -611,6 +611,6 @@ impl<'d, T: GeneralInstance4Channel> embedded_hal_02::Pwm for SimplePwm<'d, T> {
     where
         P: Into<Self::Time>,
     {
-        self.inner.set_frequency(period.into());
+        self.inner.set_frequency(period.into(), true);
     }
 }
