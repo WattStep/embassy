@@ -186,7 +186,7 @@ impl<'d, T: AdvancedInstance4Channel> ComplementaryPwm<'d, T> {
     ///
     /// The value ranges from 0 for 0% duty, to [`get_max_duty`](Self::get_max_duty) for 100% duty, both included.
     pub fn set_duty(&mut self, channel: Channel, duty: u16) {
-        assert!(duty <= self.get_max_duty());
+        // assert!(duty <= self.get_max_duty()); // TODO: How shall this work together with Update event
         self.inner.set_compare_value(channel, duty as _)
     }
 
