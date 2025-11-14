@@ -322,6 +322,11 @@ impl<'d, T: CoreInstance> Timer<'d, T> {
                 let regs = self.regs_core();
                 regs.psc().write_value(psc);
                 regs.arr().write(|r| r.set_arr(arr));
+                if generate_update_event {
+                    regs.cr1().modify(|r| r.set_urs(vals::Urs::COUNTER_ONLY));
+                    regs.egr().write(|r| r.set_ug(true));
+                    regs.cr1().modify(|r| r.set_urs(vals::Urs::ANY_EVENT));
+                }
             }
             #[cfg(not(stm32l0))]
             TimerBits::Bits32 => {
@@ -331,12 +336,12 @@ impl<'d, T: CoreInstance> Timer<'d, T> {
                 let regs = self.regs_gp32_unchecked();
                 regs.psc().write_value(psc);
                 regs.arr().write_value(arr);
+                if generate_update_event {
+                    regs.cr1().modify(|r| r.set_urs(vals::Urs::COUNTER_ONLY));
+                    regs.egr().write(|r| r.set_ug(true));
+                    regs.cr1().modify(|r| r.set_urs(vals::Urs::ANY_EVENT));
+                }
             }
-        }
-        if generate_update_event {
-            regs.cr1().modify(|r| r.set_urs(vals::Urs::COUNTER_ONLY));
-            regs.egr().write(|r| r.set_ug(true));
-            regs.cr1().modify(|r| r.set_urs(vals::Urs::ANY_EVENT));
         }
     }
 
