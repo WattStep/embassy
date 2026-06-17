@@ -4,7 +4,7 @@ use stm32_metapac::timer::vals::{self, Sms};
 
 use super::low_level::Timer;
 pub use super::{Ch1, Ch2};
-use super::{GeneralInstance4Channel, TimerPin};
+use super::{ExternalTriggerPin, GeneralInstance4Channel, TimerPin};
 use crate::Peri;
 use crate::gpio::{AfType, Flex, Pull};
 use crate::timer::TimerChannel;
@@ -92,14 +92,64 @@ impl From<QeiMode> for Sms {
 }
 
 #[cfg(timer_v2)]
-/// Encoder index configuration (TIMx_ECR fields).
+/// AB quadrature state that coincides with the encoder index pulse (TIMx_ECR.IPOS).
+///
+/// The two bits encode the channel A and channel B logic levels at the moment
+/// the index is asserted: `bit1 = ChA`, `bit0 = ChB` (TI1FP1 / TI2FP2 ordering).
+///
+/// Verify the correct value from your encoder's datasheet timing diagram.
+/// Choosing the wrong state shifts the zero position by a fraction of a revolution.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Default)]
+pub enum IndexPosition {
+    /// Index when A = low,  B = low  (IPOS = 0b00).
+    #[default]
+    A0B0 = 0,
+    /// Index when A = low,  B = high (IPOS = 0b01).
+    A0B1 = 1,
+    /// Index when A = high, B = low  (IPOS = 0b10).
+    A1B0 = 2,
+    /// Index when A = high, B = high (IPOS = 0b11).
+    A1B1 = 3,
+}
+
+#[cfg(timer_v2)]
+/// Encoder index configuration (TIMx_ECR / TIMx_SMCR fields).
+///
+/// The index signal is connected to the timer's ETR (external trigger) input.
+/// Use [`Qei::new_advanced_with_index`] to supply the ETR pin alongside this config.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy)]
 pub struct IndexConfig {
-    /// Index-direction selection.
+    /// Which counting direction(s) trigger a counter reset on the index pulse.
     pub direction: vals::Idir,
-    /// Index position selection.
-    pub position: vals::Fidx,
+    /// `FirstOnly` makes only the first index event reset the counter (one-shot).
+    pub first_only: vals::Fidx,
+    /// AB quadrature state the index pulse coincides with.
+    pub ab_position: IndexPosition,
+    /// ETR input polarity.
+    pub etr_polarity: vals::Etp,
+    /// ETR digital filter.
+    pub etr_filter: vals::FilterValue,
+    /// ETR prescaler.
+    pub etr_prescaler: vals::Etps,
+    /// Pull resistor on the ETR pin (when using [`Qei::new_advanced_with_index`]).
+    pub etr_pull: Pull,
+}
+
+#[cfg(timer_v2)]
+impl Default for IndexConfig {
+    fn default() -> Self {
+        Self {
+            direction: vals::Idir::Both,
+            first_only: vals::Fidx::AlwaysActive,
+            ab_position: IndexPosition::A0B0,
+            etr_polarity: vals::Etp::NotInverted,
+            etr_filter: vals::FilterValue::NoFilter,
+            etr_prescaler: vals::Etps::Div1,
+            etr_pull: Pull::None,
+        }
+    }
 }
 
 /// Counting direction
@@ -127,6 +177,7 @@ pub struct Qei<'d, T: GeneralInstance4Channel> {
     inner: Timer<'d, T>,
     _ch1: Flex<'d>,
     _ch2: Flex<'d>,
+    _etr: Option<Flex<'d>>,
 }
 
 impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
@@ -142,6 +193,9 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
     }
 
     /// Create a new quadrature decoder driver with extended encoder options.
+    ///
+    /// To also enable hardware index reset via the ETR pin, use
+    /// [`Self::new_advanced_with_index`] instead.
     #[allow(unused)]
     pub fn new_advanced<CH1: QeiChannel, CH2: QeiChannel, #[cfg(afio)] A>(
         tim: Peri<'d, T>,
@@ -149,7 +203,41 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
         ch2: Peri<'d, if_afio!(impl TimerPin<T, CH2, A>)>,
         config: AdvancedConfig,
     ) -> Self {
-        // Configure the pins to be used for the QEI peripheral.
+        Self::new_inner(
+            tim,
+            ch1,
+            ch2,
+            None,
+            config,
+        )
+    }
+
+    /// Create a new quadrature decoder driver with hardware index reset via the ETR pin.
+    ///
+    /// When `config.index` is `Some`, the counter resets automatically on each index
+    /// pulse without any software intervention.  The `etr` pin must be wired to the
+    /// encoder's index output and correspond to the timer's ETR alternate function.
+    #[cfg(timer_v2)]
+    #[allow(unused)]
+    pub fn new_advanced_with_index<CH1: QeiChannel, CH2: QeiChannel, #[cfg(afio)] A>(
+        tim: Peri<'d, T>,
+        ch1: Peri<'d, if_afio!(impl TimerPin<T, CH1, A>)>,
+        ch2: Peri<'d, if_afio!(impl TimerPin<T, CH2, A>)>,
+        etr: Peri<'d, if_afio!(impl ExternalTriggerPin<T, A>)>,
+        config: AdvancedConfig,
+    ) -> Self {
+        let etr_pull = config.index.map(|i| i.etr_pull).unwrap_or(Pull::None);
+        let etr_flex = new_pin!(etr, AfType::input(etr_pull));
+        Self::new_inner(tim, ch1, ch2, etr_flex, config)
+    }
+
+    fn new_inner<CH1: QeiChannel, CH2: QeiChannel, #[cfg(afio)] A>(
+        tim: Peri<'d, T>,
+        ch1: Peri<'d, if_afio!(impl TimerPin<T, CH1, A>)>,
+        ch2: Peri<'d, if_afio!(impl TimerPin<T, CH2, A>)>,
+        etr: Option<Flex<'d>>,
+        config: AdvancedConfig,
+    ) -> Self {
         critical_section::with(|_| {
             ch1.set_low();
             ch2.set_low();
@@ -182,8 +270,15 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
 
         #[cfg(timer_v2)]
         if let Some(index) = config.index {
+            r.smcr().modify(|w| {
+                w.set_etp(index.etr_polarity);
+                w.set_etps(index.etr_prescaler);
+                w.set_etf(index.etr_filter);
+            });
             inner.set_encoder_index_direction(index.direction);
-            inner.set_encoder_index_position(index.position);
+            inner.set_encoder_index_position(index.first_only);
+            inner.set_encoder_index_ipos(index.ab_position as u8);
+            inner.enable_encoder_index(true);
         }
 
         #[cfg(timer_v2)]
@@ -196,6 +291,7 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
             inner,
             _ch1: new_pin!(ch1, AfType::input(config.base.ch1_pull)).unwrap(),
             _ch2: new_pin!(ch2, AfType::input(config.base.ch2_pull)).unwrap(),
+            _etr: etr,
         }
     }
 

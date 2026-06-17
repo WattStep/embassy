@@ -824,6 +824,21 @@ impl<'d, T: GeneralInstance4Channel> Timer<'d, T> {
     }
 
     #[cfg(timer_v2)]
+    /// Enable or disable the encoder index feature (TIMx_ECR.IE).
+    pub fn enable_encoder_index(&self, enable: bool) {
+        self.regs_gp16().ecr().modify(|w| w.set_ie(enable));
+    }
+
+    #[cfg(timer_v2)]
+    /// Select which AB quadrature state coincides with the index pulse (TIMx_ECR.IPOS).
+    ///
+    /// Bits: bit1 = B state, bit0 = A state. Valid range 0–3.
+    /// Check the encoder datasheet timing diagram for the correct value.
+    pub fn set_encoder_index_ipos(&self, ipos: u8) {
+        self.regs_gp16().ecr().modify(|w| w.set_ipos(ipos));
+    }
+
+    #[cfg(timer_v2)]
     /// Enable/disable index event interrupts (TIMx_DIER.IDXIE).
     pub fn enable_encoder_index_interrupt(&self, enable: bool) {
         self.regs_gp16().dier().modify(|w| w.set_idxie(enable));
