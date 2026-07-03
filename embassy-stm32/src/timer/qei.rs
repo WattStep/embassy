@@ -1,13 +1,18 @@
 //! Quadrature decoder using a timer.
 
 use stm32_metapac::timer::vals::{self, Sms};
-
 use super::low_level::Timer;
 pub use super::{Ch1, Ch2};
-use super::{ExternalTriggerPin, GeneralInstance4Channel, TimerPin};
+use super::{GeneralInstance4Channel, TimerPin};
 use crate::Peri;
 use crate::gpio::{AfType, Flex, Pull};
 use crate::timer::TimerChannel;
+
+#[cfg(timer_v2)]
+pub use stm32_metapac::timer::vals::{Etp, Etps, Fidx, FilterValue, Idir};
+
+#[cfg(timer_v2)]
+use super::ExternalTriggerPin;
 
 /// Qei driver config.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
