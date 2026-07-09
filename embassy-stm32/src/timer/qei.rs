@@ -4,7 +4,7 @@ use stm32_metapac::timer::vals::{self, Sms};
 
 use super::low_level::Timer;
 pub use super::{Ch1, Ch2};
-use super::{GeneralInstance4Channel, TimerPin};
+use super::{GeneralInstance32bit4Channel, TimerPin};
 use crate::Peri;
 use crate::gpio::{AfType, Flex, Pull};
 use crate::timer::TimerChannel;
@@ -20,7 +20,7 @@ pub struct Config {
     /// Specifies the encoder mode to use for the Qei peripheral.
     pub mode: QeiMode,
     /// Sets the auto-reload value for the counter.
-    pub auto_reload: u16,
+    pub auto_reload: u32,
 }
 
 impl Default for Config {
@@ -30,7 +30,7 @@ impl Default for Config {
             ch1_pull: Pull::None,
             ch2_pull: Pull::None,
             mode: QeiMode::Mode3,
-            auto_reload: u16::MAX,
+            auto_reload: u32::MAX,
         }
     }
 }
@@ -123,13 +123,13 @@ impl SealedQeiChannel for Ch1 {}
 impl SealedQeiChannel for Ch2 {}
 
 /// Quadrature decoder driver.
-pub struct Qei<'d, T: GeneralInstance4Channel> {
+pub struct Qei<'d, T: GeneralInstance32bit4Channel> {
     inner: Timer<'d, T>,
     _ch1: Flex<'d>,
     _ch2: Flex<'d>,
 }
 
-impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
+impl<'d, T: GeneralInstance32bit4Channel> Qei<'d, T> {
     /// Create a new quadrature decoder driver, with a given [`Config`].
     #[allow(unused)]
     pub fn new<CH1: QeiChannel, CH2: QeiChannel, #[cfg(afio)] A>(
@@ -156,7 +156,7 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
         });
 
         let inner = Timer::new(tim);
-        let r = inner.regs_gp16();
+        let r = inner.regs_gp32();
 
         // Configure TxC1 and TxC2 as captures
         r.ccmr_input(0).modify(|w| {
@@ -177,7 +177,7 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
             w.set_sms(config.base.mode.into());
         });
 
-        r.arr().modify(|w| w.set_arr(config.base.auto_reload));
+        r.arr().write_value(config.base.auto_reload);
         inner.generate_update_event();
         r.cr1().modify(|w| w.set_cen(true));
 
@@ -202,20 +202,20 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
 
     /// Get direction.
     pub fn read_direction(&self) -> Direction {
-        match self.inner.regs_gp16().cr1().read().dir() {
+        match self.inner.regs_gp32().cr1().read().dir() {
             vals::Dir::Down => Direction::Downcounting,
             vals::Dir::Up => Direction::Upcounting,
         }
     }
 
     /// Get count.
-    pub fn count(&self) -> u16 {
-        self.inner.regs_gp16().cnt().read().cnt()
+    pub fn count(&self) -> u32 {
+        self.inner.regs_gp32().cnt().read()
     }
 
     /// Reset count.
     pub fn reset(&mut self) {
-        self.inner.regs_gp16().cnt().modify(|w| w.set_cnt(0));
+        self.inner.regs_gp32().cnt().write_value(0);
     }
 
     #[cfg(timer_v2)]
