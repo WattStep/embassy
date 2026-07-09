@@ -4,15 +4,17 @@ use stm32_metapac::timer::vals::{self, Sms};
 
 use super::low_level::Timer;
 pub use super::{Ch1, Ch2};
-use super::{GeneralInstance32bit4Channel, TimerPin};
+use super::{GeneralInstance4Channel, TimerPin};
 use crate::Peri;
 use crate::gpio::{AfType, Flex, Pull};
 use crate::timer::TimerChannel;
 
 /// Qei driver config.
+///
+/// `W` is the timer's counter word type: `u16` for 16-bit timers, `u32` for 32-bit timers.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy)]
-pub struct Config {
+pub struct Config<W> {
     /// Configures the internal pull up/down resistor for Qei's channel 1 pin.
     pub ch1_pull: Pull,
     /// Configures the internal pull up/down resistor for Qei's channel 2 pin.
@@ -20,30 +22,36 @@ pub struct Config {
     /// Specifies the encoder mode to use for the Qei peripheral.
     pub mode: QeiMode,
     /// Sets the auto-reload value for the counter.
-    pub auto_reload: u32,
+    pub auto_reload: W,
 }
 
-impl Default for Config {
-    /// Arbitrary defaults to preserve backwards compatibility
-    fn default() -> Self {
-        Self {
-            ch1_pull: Pull::None,
-            ch2_pull: Pull::None,
-            mode: QeiMode::Mode3,
-            auto_reload: u32::MAX,
+macro_rules! impl_config_default {
+    ($W:ty) => {
+        impl Default for Config<$W> {
+            fn default() -> Self {
+                Self {
+                    ch1_pull: Pull::None,
+                    ch2_pull: Pull::None,
+                    mode: QeiMode::Mode3,
+                    auto_reload: <$W>::MAX,
+                }
+            }
         }
-    }
+    };
 }
+
+impl_config_default!(u16);
+impl_config_default!(u32);
 
 /// Advanced QEI configuration.
 ///
 /// This extends [`Config`] with optional encoder-index controls on timer variants
 /// that expose TIMx_ECR/TIMx_SR index fields.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Copy, Default)]
-pub struct AdvancedConfig {
+#[derive(Clone, Copy)]
+pub struct AdvancedConfig<W> {
     /// Base QEI configuration.
-    pub base: Config,
+    pub base: Config<W>,
     /// Optional index behavior configuration.
     #[cfg(timer_v2)]
     pub index: Option<IndexConfig>,
@@ -55,8 +63,17 @@ pub struct AdvancedConfig {
     pub enable_direction_change_interrupt: bool,
 }
 
-impl From<Config> for AdvancedConfig {
-    fn from(base: Config) -> Self {
+impl<W> Default for AdvancedConfig<W>
+where
+    Config<W>: Default,
+{
+    fn default() -> Self {
+        Config::default().into()
+    }
+}
+
+impl<W> From<Config<W>> for AdvancedConfig<W> {
+    fn from(base: Config<W>) -> Self {
         Self {
             base,
             #[cfg(timer_v2)]
@@ -123,20 +140,20 @@ impl SealedQeiChannel for Ch1 {}
 impl SealedQeiChannel for Ch2 {}
 
 /// Quadrature decoder driver.
-pub struct Qei<'d, T: GeneralInstance32bit4Channel> {
+pub struct Qei<'d, T: GeneralInstance4Channel> {
     inner: Timer<'d, T>,
     _ch1: Flex<'d>,
     _ch2: Flex<'d>,
 }
 
-impl<'d, T: GeneralInstance32bit4Channel> Qei<'d, T> {
+impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
     /// Create a new quadrature decoder driver, with a given [`Config`].
     #[allow(unused)]
     pub fn new<CH1: QeiChannel, CH2: QeiChannel, #[cfg(afio)] A>(
         tim: Peri<'d, T>,
         ch1: Peri<'d, if_afio!(impl TimerPin<T, CH1, A>)>,
         ch2: Peri<'d, if_afio!(impl TimerPin<T, CH2, A>)>,
-        config: Config,
+        config: Config<T::Word>,
     ) -> Self {
         Self::new_advanced(tim, ch1, ch2, config.into())
     }
@@ -147,7 +164,7 @@ impl<'d, T: GeneralInstance32bit4Channel> Qei<'d, T> {
         tim: Peri<'d, T>,
         ch1: Peri<'d, if_afio!(impl TimerPin<T, CH1, A>)>,
         ch2: Peri<'d, if_afio!(impl TimerPin<T, CH2, A>)>,
-        config: AdvancedConfig,
+        config: AdvancedConfig<T::Word>,
     ) -> Self {
         // Configure the pins to be used for the QEI peripheral.
         critical_section::with(|_| {
@@ -156,7 +173,7 @@ impl<'d, T: GeneralInstance32bit4Channel> Qei<'d, T> {
         });
 
         let inner = Timer::new(tim);
-        let r = inner.regs_gp32();
+        let r = inner.regs_gp16();
 
         // Configure TxC1 and TxC2 as captures
         r.ccmr_input(0).modify(|w| {
@@ -177,8 +194,7 @@ impl<'d, T: GeneralInstance32bit4Channel> Qei<'d, T> {
             w.set_sms(config.base.mode.into());
         });
 
-        r.arr().write_value(config.base.auto_reload);
-        inner.generate_update_event();
+        inner.set_max_compare_value(config.base.auto_reload);
         r.cr1().modify(|w| w.set_cen(true));
 
         #[cfg(timer_v2)]
@@ -202,20 +218,20 @@ impl<'d, T: GeneralInstance32bit4Channel> Qei<'d, T> {
 
     /// Get direction.
     pub fn read_direction(&self) -> Direction {
-        match self.inner.regs_gp32().cr1().read().dir() {
+        match self.inner.regs_gp16().cr1().read().dir() {
             vals::Dir::Down => Direction::Downcounting,
             vals::Dir::Up => Direction::Upcounting,
         }
     }
 
     /// Get count.
-    pub fn count(&self) -> u32 {
-        self.inner.regs_gp32().cnt().read()
+    pub fn count(&self) -> T::Word {
+        self.inner.get_counter()
     }
 
     /// Reset count.
     pub fn reset(&mut self) {
-        self.inner.regs_gp32().cnt().write_value(0);
+        self.inner.reset();
     }
 
     #[cfg(timer_v2)]

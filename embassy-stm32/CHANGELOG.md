@@ -34,6 +34,8 @@ COMP:
 - feat: stm32/comp: add support for comp_v1 (used on G0)
 
 Timer:
+- fix: stm32/timer/qei: support 32-bit timers. Breaking: `qei::Config` and `qei::AdvancedConfig` are now generic over the timer's counter word type, `auto_reload` is that word type (`u32` on 32-bit timers, defaulting to the full counter range), and `Qei::count()` returns it. Previously on 32-bit timers the upper half of ARR was left at its reset value instead of being set, `count()` truncated to 16 bits, and `reset()` only cleared the low half of the counter.
+- feat: stm32/timer: add low-level `Timer::get_counter()` returning the full-width counter value
 - feat: stm32/timer/input_capture: add per-channel split API for concurrent multi-channel capture
 - feat: stm32/timer: add timer_v2 dithering APIs (`DitheringConfig`, ARR/CCR fractional nibble setters) in low-level, simple PWM, and complementary PWM drivers
 - feat: stm32/timer: add low-level timer status helpers for UIF remap control and counting direction (`is_counting_up`/`is_counting_down`)
