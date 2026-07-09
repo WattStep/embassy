@@ -178,6 +178,7 @@ impl<'d, T: GeneralInstance4Channel> Qei<'d, T> {
         });
 
         r.arr().modify(|w| w.set_arr(config.base.auto_reload));
+        inner.generate_update_event();
         r.cr1().modify(|w| w.set_cen(true));
 
         #[cfg(timer_v2)]
