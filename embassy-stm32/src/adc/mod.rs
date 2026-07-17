@@ -598,6 +598,10 @@ impl<'d, T: Instance> Adc<'d, T> {
 
         // Ensure no conversions are ongoing
         T::regs().stop();
+        // DIFSEL (channel differential-mode select), which configure_sequence writes as part of
+        // the regular sequence, is only writable while the ADC is disabled (ADEN=0) — see RM0440
+        // §21.7.21. Adc::new() already left the ADC enabled, so power it down first.
+        T::regs().power_down();
         T::regs().configure_sequence(
             sequence.map(|(channel, sample_time)| ((channel.channel, channel.is_differential), sample_time)),
         );
@@ -654,13 +658,17 @@ impl<'d, T: Instance<Regs: InjectedAdcRegs>> Adc<'d, T> {
             NR_INJECTED_RANKS
         );
 
-        // TODO: move enable after configure_sequence?
-        T::regs().enable();
+        // DIFSEL is only writable while the ADC is disabled (ADEN=0) — see RM0440 §21.7.21.
+        // Adc::new() (and, when this runs as part of into_ring_buffered_and_injected, the prior
+        // into_ring_buffered call) already left the ADC enabled, so power it down first, then
+        // re-enable once the injected sequence's differential channels are configured.
+        T::regs().power_down();
         T::regs().configure_injected_sequence(
             sequence
                 .iter()
                 .map(|(channel, sample_time)| ((channel.channel, channel.is_differential), *sample_time)),
         );
+        T::regs().enable();
 
         T::regs().configure_injected_trigger((trigger._trigger, trigger._edge), interrupt);
         T::regs().start_injected();
